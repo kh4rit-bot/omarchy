@@ -5,48 +5,30 @@
 
 set -e
 
-TCP_PORTS=(27036)
-UDP_PORTS=(27031:27036 10400:10401)
+# The port set lives in the "Omarchy Steam" UFW application profile that the
+# installer copied into place; delete the rules against it, then the profile.
+UFW_APP="Omarchy Steam"
+UFW_APP_PROFILE_TARGET="/etc/ufw/applications.d/omarchy-steam"
 PRIVATE_CIDRS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16)
 
 delete_ufw_rule() {
   sudo ufw --force delete "$@" >/dev/null 2>&1 || true
 }
 
-close_ufw_port_for_private_lans() {
-  local proto="$1"
-  local port="$2"
-  local cidr
-
-  for cidr in "${PRIVATE_CIDRS[@]}"; do
-    delete_ufw_rule allow in proto "$proto" from "$cidr" to any port "$port"
-  done
-}
-
-close_ufw_port_for_tailscale() {
-  local proto="$1"
-  local port="$2"
-
-  delete_ufw_rule allow in on tailscale0 to any port "$port" proto "$proto"
-}
-
 close_ufw_ports() {
-  local port
+  local cidr
 
   if omarchy-cmd-missing ufw; then
     return
   fi
 
-  for port in "${TCP_PORTS[@]}"; do
-    close_ufw_port_for_private_lans tcp "$port"
-    close_ufw_port_for_tailscale tcp "$port"
+  for cidr in "${PRIVATE_CIDRS[@]}"; do
+    delete_ufw_rule allow in from "$cidr" to any app "$UFW_APP"
   done
 
-  for port in "${UDP_PORTS[@]}"; do
-    close_ufw_port_for_private_lans udp "$port"
-    close_ufw_port_for_tailscale udp "$port"
-  done
+  delete_ufw_rule allow in on tailscale0 to any app "$UFW_APP"
 
+  sudo rm -f "$UFW_APP_PROFILE_TARGET"
   sudo ufw reload
 }
 

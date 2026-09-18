@@ -5,51 +5,31 @@
 
 set -e
 
-# Inbound ports Valve documents for Steam Remote Play (Steam Link, Remote Play Together):
-# https://help.steampowered.com/en/faqs/view/2EA8-4D75-DA21-31EB
-# plus the UDP ports Steam Link needs for VR streaming to SteamVR (Quest and other headsets):
-# https://help.steampowered.com/en/faqs/view/3E3D-BE6B-787D-A5D2
-TCP_PORTS=(27036)
-UDP_PORTS=(27031:27036 10400:10401)
+# The inbound port set for Steam Remote Play and Steam Link VR streaming is
+# declared once, in the "Omarchy Steam" UFW application profile.
+UFW_APP="Omarchy Steam"
+UFW_APP_PROFILE_SOURCE="$OMARCHY_PATH/default/ufw/applications.d/omarchy-steam"
+UFW_APP_PROFILE_TARGET="/etc/ufw/applications.d/omarchy-steam"
 PRIVATE_CIDRS=(10.0.0.0/8 172.16.0.0/12 192.168.0.0/16)
-UFW_COMMENT="omarchy-steam"
-
-open_ufw_port_for_private_lans() {
-  local proto="$1"
-  local port="$2"
-  local cidr
-
-  for cidr in "${PRIVATE_CIDRS[@]}"; do
-    sudo ufw allow in proto "$proto" from "$cidr" to any port "$port" comment "$UFW_COMMENT" >/dev/null
-  done
-}
-
-open_ufw_port_for_tailscale() {
-  local proto="$1"
-  local port="$2"
-
-  if ip link show tailscale0 >/dev/null 2>&1; then
-    sudo ufw allow in on tailscale0 to any port "$port" proto "$proto" comment "$UFW_COMMENT" >/dev/null
-  fi
-}
 
 open_ufw_ports() {
-  local port
+  local cidr
 
   if omarchy-cmd-missing ufw; then
     echo "UFW is not installed; skipping Steam Remote Play firewall rules."
     return
   fi
 
-  for port in "${TCP_PORTS[@]}"; do
-    open_ufw_port_for_private_lans tcp "$port"
-    open_ufw_port_for_tailscale tcp "$port"
+  sudo install -Dm644 "$UFW_APP_PROFILE_SOURCE" "$UFW_APP_PROFILE_TARGET"
+  sudo ufw app update "$UFW_APP" >/dev/null
+
+  for cidr in "${PRIVATE_CIDRS[@]}"; do
+    sudo ufw allow in from "$cidr" to any app "$UFW_APP" >/dev/null
   done
 
-  for port in "${UDP_PORTS[@]}"; do
-    open_ufw_port_for_private_lans udp "$port"
-    open_ufw_port_for_tailscale udp "$port"
-  done
+  if ip link show tailscale0 >/dev/null 2>&1; then
+    sudo ufw allow in on tailscale0 to any app "$UFW_APP" >/dev/null
+  fi
 
   sudo ufw reload
 }
